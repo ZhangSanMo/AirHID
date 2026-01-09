@@ -38,6 +38,26 @@ type KeyRequest struct {
 	Key string `json:"key"`
 }
 
+type MouseRequest struct {
+	Action string  `json:"action"` // move, click, right_click, scroll
+	X      float64 `json:"x"`      // dx for move
+	Y      float64 `json:"y"`      // dy for move or scroll
+}
+
+var (
+	user32         = syscall.NewLazyDLL("user32.dll")
+	procMouseEvent = user32.NewProc("mouse_event")
+)
+
+const (
+	MOUSEEVENTF_MOVE      = 0x0001
+	MOUSEEVENTF_LEFTDOWN  = 0x0002
+	MOUSEEVENTF_LEFTUP    = 0x0004
+	MOUSEEVENTF_RIGHTDOWN = 0x0008
+	MOUSEEVENTF_RIGHTUP   = 0x0010
+	MOUSEEVENTF_WHEEL     = 0x0800
+)
+
 func main() {
 	if !isAdmin() {
 		fmt.Println("Warning: Running without Administrator privileges. Input simulation into elevated windows may fail.")
@@ -62,6 +82,7 @@ func main() {
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/type", handleType)
 	http.HandleFunc("/key", handleKey)
+	http.HandleFunc("/mouse", handleMouse)
 	http.HandleFunc("/api/info", handleInfo)
 
 	log.Fatal(http.ListenAndServe("0.0.0.0:5000", nil))
@@ -121,6 +142,41 @@ func handleType(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, true, "")
+}
+
+func handleMouse(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req MouseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, false, err.Error())
+		return
+	}
+
+	switch req.Action {
+	case "move":
+		mouseEvent(MOUSEEVENTF_MOVE, uintptr(int32(req.X)), uintptr(int32(req.Y)), 0, 0)
+	case "click":
+		mouseEvent(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+		time.Sleep(10 * time.Millisecond)
+		mouseEvent(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+	case "right_click":
+		mouseEvent(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+		time.Sleep(10 * time.Millisecond)
+		mouseEvent(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+	case "scroll":
+		// dwData for wheel is amount of movement in multiples of WHEEL_DELTA (120)
+		mouseEvent(MOUSEEVENTF_WHEEL, 0, 0, uintptr(int32(req.Y)), 0)
+	}
+
+	jsonResponse(w, true, "")
+}
+
+func mouseEvent(dwFlags, dx, dy, dwData, dwExtraInfo uintptr) {
+	procMouseEvent.Call(dwFlags, dx, dy, dwData, dwExtraInfo)
 }
 
 func handleKey(w http.ResponseWriter, r *http.Request) {

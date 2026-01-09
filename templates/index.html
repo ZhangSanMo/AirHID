@@ -104,6 +104,7 @@
             background: #d1d1d6;
             padding: 2px;
             border-radius: 8px;
+            margin-bottom: 8px;
         }
 
         .mode-btn {
@@ -123,10 +124,42 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
+        #touchpadArea {
+            flex: 1;
+            background: #fff;
+            border: 0.5px solid #d1d1d6;
+            border-radius: 12px;
+            display: none;
+            flex-direction: column;
+            position: relative;
+            touch-action: none;
+            user-select: none;
+            box-shadow: inset 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        #touchpadArea.active {
+            display: flex;
+        }
+
+        .touchpad-label {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #d1d1d6;
+            font-size: 24px;
+            font-weight: 700;
+            pointer-events: none;
+        }
+
         .button-grid {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
             gap: 8px;
+        }
+
+        .button-grid.hidden {
+            display: none;
         }
 
         .btn {
@@ -180,9 +213,14 @@
         <div class="mode-selector">
             <button class="mode-btn active" id="mType" onclick="setMode('type')">直接输入</button>
             <button class="mode-btn" id="mClip" onclick="setMode('clipboard')">同步剪贴板</button>
+            <button class="mode-btn" id="mTouch" onclick="setMode('touchpad')">触摸板</button>
         </div>
 
-        <div class="button-grid">
+        <div id="touchpadArea">
+            <div class="touchpad-label">TOUCHPAD</div>
+        </div>
+
+        <div class="button-grid" id="mainButtons">
             <button class="btn btn-red" onclick="clearTxt()">清空</button>
             <button class="btn btn-blue" onclick="sendKey('backspace')">退格</button>
             <button class="btn btn-blue" onclick="sendKey('enter')">回车</button>
@@ -202,6 +240,94 @@
         let mode = 'type';
         const input = document.getElementById('mainInput');
         const hint = document.getElementById('hint');
+        const touchpad = document.getElementById('touchpadArea');
+        const buttons = document.getElementById('mainButtons');
+
+        let lastX, lastY;
+        let isMoving = false;
+        let startTime;
+        let maxFingers = 0;
+        let sensitivity = 1.5;
+
+        // Touchpad logic
+        touchpad.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            lastX = touch.clientX;
+            lastY = touch.clientY;
+            isMoving = false;
+            startTime = Date.now();
+            maxFingers = Math.max(maxFingers, e.touches.length);
+        });
+
+        touchpad.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            maxFingers = Math.max(maxFingers, e.touches.length);
+            const touch = e.touches[0];
+            const dx = (touch.clientX - lastX) * sensitivity;
+            const dy = (touch.clientY - lastY) * sensitivity;
+
+            if (e.touches.length === 1) {
+                if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
+                    sendMouseMove(dx, dy);
+                    isMoving = true;
+                }
+            } else if (e.touches.length === 2) {
+                // Two finger scroll
+                const sdy = (touch.clientY - lastY) * sensitivity;
+                if (Math.abs(sdy) > 1) {
+                    sendMouseScroll(sdy * 5); // Adjust direction
+                    isMoving = true;
+                }
+            }
+            
+            lastX = touch.clientX;
+            lastY = touch.clientY;
+        }, { passive: false });
+
+        touchpad.addEventListener('touchend', (e) => {
+            const duration = Date.now() - startTime;
+            if (!isMoving && duration < 250) {
+                if (maxFingers === 1) {
+                    sendMouseClick('click');
+                } else if (maxFingers === 2) {
+                    sendMouseClick('right_click');
+                }
+            }
+            if (e.touches.length === 0) maxFingers = 0;
+        });
+
+        // Add right click support via long press or just double tap? 
+        // Let's stick to simple tap for now. Maybe a button for right click.
+
+        async function sendMouseMove(dx, dy) {
+            try {
+                await fetch('/mouse', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: 'move', x: dx, y: dy })
+                });
+            } catch (e) {}
+        }
+
+        async function sendMouseClick(action) {
+            try {
+                await fetch('/mouse', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: action })
+                });
+            } catch (e) {}
+        }
+
+        async function sendMouseScroll(dy) {
+            try {
+                await fetch('/mouse', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: 'scroll', y: dy })
+                });
+            } catch (e) {}
+        }
 
         async function checkStatus() {
             try {
@@ -227,8 +353,20 @@
             mode = m;
             document.getElementById('mType').className = m === 'type' ? 'mode-btn active' : 'mode-btn';
             document.getElementById('mClip').className = m === 'clipboard' ? 'mode-btn active' : 'mode-btn';
-            document.getElementById('mainBtn').innerText = m === 'type' ? '发送内容' : '同步剪贴板';
-            updateHint(`已切至${m==='type'?'输入':'剪贴板'}模式`);
+            document.getElementById('mTouch').className = m === 'touchpad' ? 'mode-btn active' : 'mode-btn';
+            
+            if (m === 'touchpad') {
+                touchpad.className = 'active';
+                buttons.className = 'button-grid hidden';
+                document.querySelector('.input-container').style.display = 'none';
+            } else {
+                touchpad.className = '';
+                buttons.className = 'button-grid';
+                document.querySelector('.input-container').style.display = 'flex';
+                document.getElementById('mainBtn').innerText = m === 'type' ? '发送内容' : '同步剪贴板';
+            }
+            
+            updateHint(`已切至${m==='type'?'输入':(m==='clipboard'?'剪贴板':'触摸板')}模式`);
         }
 
         function updateHint(msg, err=false) {
