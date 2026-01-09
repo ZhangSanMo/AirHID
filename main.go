@@ -220,6 +220,10 @@ func handleKey(w http.ResponseWriter, r *http.Request) {
 		kb.SetKeys(keybd_event.VK_UP)
 	case "down":
 		kb.SetKeys(keybd_event.VK_DOWN)
+	case "left":
+		kb.SetKeys(keybd_event.VK_LEFT)
+	case "right":
+		kb.SetKeys(keybd_event.VK_RIGHT)
 	default:
 		// Try to map single characters if possible, but the API seems to send specific commands
 		// If it sends 'a', 'b', etc., we would need a map. 
