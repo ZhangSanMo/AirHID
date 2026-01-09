@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -8,7 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -18,6 +20,9 @@ import (
 	"github.com/micmonay/keybd_event"
 	"golang.org/x/sys/windows"
 )
+
+//go:embed templates/index.html
+var templatesFS embed.FS
 
 type Response struct {
 	Success bool   `json:"success"`
@@ -41,8 +46,8 @@ func main() {
 	// Logging
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	// Get Local IP
-	localIP := getLocalIP()
+	// Get all available IPs and let user choose
+	localIP := selectIP()
 	url := fmt.Sprintf("http://%s:5000", localIP)
 	
 	fmt.Printf("\n%s\n", strings.Repeat("=", 40))
@@ -63,8 +68,7 @@ func main() {
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
-	tmplPath := filepath.Join("templates", "index.html")
-	tmpl, err := template.ParseFiles(tmplPath)
+	tmpl, err := template.ParseFS(templatesFS, "templates/index.html")
 	if err != nil {
 		http.Error(w, "Template not found: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -191,6 +195,98 @@ func jsonResponse(w http.ResponseWriter, success bool, errMsg string) {
 	w.Header().Set("Content-Type", "application/json")
 	resp := Response{Success: success, Error: errMsg}
 	json.NewEncoder(w).Encode(resp)
+}
+
+// IPInfo stores IP address and its interface name
+type IPInfo struct {
+	IP        string
+	Interface string
+}
+
+// getAllIPs returns all available IPv4 addresses with their interface names
+func getAllIPs() []IPInfo {
+	var ips []IPInfo
+	
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ips
+	}
+	
+	for _, iface := range interfaces {
+		// Skip loopback and down interfaces
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			
+			// Only include IPv4 addresses and skip loopback
+			if ip == nil || ip.IsLoopback() || ip.To4() == nil {
+				continue
+			}
+			
+			ips = append(ips, IPInfo{
+				IP:        ip.String(),
+				Interface: iface.Name,
+			})
+		}
+	}
+	
+	return ips
+}
+
+// selectIP displays available IPs and lets user choose one
+func selectIP() string {
+	ips := getAllIPs()
+	
+	if len(ips) == 0 {
+		fmt.Println("No network interface found, using localhost")
+		return "localhost"
+	}
+	
+	if len(ips) == 1 {
+		fmt.Printf("Using IP: %s (%s)\n", ips[0].IP, ips[0].Interface)
+		return ips[0].IP
+	}
+	
+	// Multiple IPs available, let user choose
+	fmt.Println("\nMultiple network interfaces detected:")
+	fmt.Println(strings.Repeat("-", 50))
+	for i, info := range ips {
+		fmt.Printf("  [%d] %s (%s)\n", i+1, info.IP, info.Interface)
+	}
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Printf("Please select IP [1-%d] (default 1): ", len(ips))
+	
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+	
+	// Default to first IP if empty input
+	if input == "" {
+		return ips[0].IP
+	}
+	
+	// Parse user selection
+	choice, err := strconv.Atoi(input)
+	if err != nil || choice < 1 || choice > len(ips) {
+		fmt.Printf("Invalid selection, using default: %s\n", ips[0].IP)
+		return ips[0].IP
+	}
+	
+	return ips[choice-1].IP
 }
 
 func getLocalIP() string {
