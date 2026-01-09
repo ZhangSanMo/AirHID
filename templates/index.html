@@ -227,7 +227,8 @@
             <button class="btn btn-blue" onclick="sendKey('tab')">Tab</button>
 
             <button class="btn btn-blue" style="grid-column: span 2;" onclick="sendKey('ctrl_enter')">Ctrl + Enter</button>
-            <button class="btn btn-primary" style="grid-column: span 2;" id="mainBtn" onclick="doSend()">发送内容</button>
+            <button class="btn btn-primary" id="mainBtn" onclick="doSend()">发送内容</button>
+            <button class="btn btn-primary" style="background: #5856d6;" onclick="sendCommand()">发送命令</button>
 
             <button class="btn" onclick="sendKey('esc')">Esc</button>
             <button class="btn" onclick="sendKey('space')">空格</button>
@@ -393,6 +394,24 @@
                     if (mode === 'type') input.value = '';
                 }
             } catch (e) { updateHint('失败', true); }
+        }
+
+        async function sendCommand() {
+            if (!input.value) return;
+            try {
+                const res = await fetch('/command', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ command: input.value })
+                });
+                if (res.ok) {
+                    updateHint('命令已发送');
+                    input.value = '';
+                } else {
+                    const data = await res.json();
+                    updateHint(data.error || '命令解析失败', true);
+                }
+            } catch (e) { updateHint('发送失败', true); }
         }
 
         async function sendKey(k) {

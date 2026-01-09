@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -38,6 +39,10 @@ type KeyRequest struct {
 	Key string `json:"key"`
 }
 
+type CommandRequest struct {
+	Command string `json:"command"`
+}
+
 type MouseRequest struct {
 	Action string  `json:"action"` // move, click, right_click, scroll
 	X      float64 `json:"x"`      // dx for move
@@ -47,6 +52,7 @@ type MouseRequest struct {
 var (
 	user32         = syscall.NewLazyDLL("user32.dll")
 	procMouseEvent = user32.NewProc("mouse_event")
+	kbMutex        sync.Mutex
 )
 
 const (
@@ -81,6 +87,7 @@ func main() {
 
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/type", handleType)
+	http.HandleFunc("/command", handleCommand)
 	http.HandleFunc("/key", handleKey)
 	http.HandleFunc("/mouse", handleMouse)
 	http.HandleFunc("/api/info", handleInfo)
@@ -120,6 +127,9 @@ func handleType(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Mode == "type" {
+		kbMutex.Lock()
+		defer kbMutex.Unlock()
+		
 		log.Printf("Injecting text via Clipboard: %.50s...", req.Text)
 		if err := clipboard.WriteAll(req.Text); err != nil {
 			jsonResponse(w, false, "Clipboard error: "+err.Error())
@@ -191,6 +201,9 @@ func handleKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	kbMutex.Lock()
+	defer kbMutex.Unlock()
+
 	log.Printf("Simulated Key: %s", req.Key)
 	
 	kb, err := keybd_event.NewKeyBonding()
@@ -198,9 +211,6 @@ func handleKey(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, false, "Key bonding error: "+err.Error())
 		return
 	}
-
-	// For Linux/Windows specific set up if needed, but defaults are usually fine for standard keys
-	// keybd_event defaults to windows on windows
 
 	switch req.Key {
 	case "ctrl_enter":
@@ -225,10 +235,6 @@ func handleKey(w http.ResponseWriter, r *http.Request) {
 	case "right":
 		kb.SetKeys(keybd_event.VK_RIGHT)
 	default:
-		// Try to map single characters if possible, but the API seems to send specific commands
-		// If it sends 'a', 'b', etc., we would need a map. 
-		// The python code had a fallback to `pyautogui.press(key)`.
-		// For now we handle the buttons in the UI.
 		jsonResponse(w, false, "Unknown key: "+req.Key)
 		return
 	}
@@ -239,6 +245,224 @@ func handleKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, true, "")
+}
+
+func handleCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req CommandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonResponse(w, false, err.Error())
+		return
+	}
+
+	kbMutex.Lock()
+	defer kbMutex.Unlock()
+
+	log.Printf("收到原始命令: %q", req.Command)
+	err := executeCommand(req.Command)
+	if err != nil {
+		log.Printf("命令执行失败: %v", err)
+		jsonResponse(w, false, err.Error())
+		return
+	}
+
+	jsonResponse(w, true, "")
+}
+
+func executeCommand(cmd string) error {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return fmt.Errorf("命令不能为空")
+	}
+
+	// 1. 全角转半角及初步标准化
+	fullWidth := []rune("＋－＝，。？！（）［］｛｝＜＞／＼｜：；＂＇　")
+	halfWidth := []rune("+-=,.?!()[]{}<>/\\|:;\"' ")
+	for i, r := range fullWidth {
+		if i < len(halfWidth) {
+			cmd = strings.ReplaceAll(cmd, string(r), string(halfWidth[i]))
+		}
+	}
+	
+	// 2. 识别是否是严格模式（保留大小写，因为某些应用区分）
+	isStrict := false
+	if strings.HasPrefix(cmd, "执行") {
+		isStrict = true
+		cmd = strings.TrimPrefix(cmd, "执行")
+	} else if strings.HasPrefix(cmd, "发送") {
+		cmd = strings.TrimPrefix(cmd, "发送")
+	}
+
+	// 3. 处理组合键语法 (如 Ctrl+S, Ctrl-S, Ctrl 加 S)
+	// 将常见的组合键连接符标准化为 "+"
+	cmd = strings.ReplaceAll(cmd, " 加 ", "+")
+	cmd = strings.ReplaceAll(cmd, " 同 ", "+")
+	cmd = strings.ReplaceAll(cmd, " 和 ", "+")
+	cmd = strings.ReplaceAll(cmd, "-", "+")
+
+	// 4. 解析按键
+	var parts []string
+	if strings.Contains(cmd, "+") {
+		parts = strings.Split(cmd, "+")
+	} else {
+		parts = strings.Fields(cmd)
+	}
+
+	kb, err := keybd_event.NewKeyBonding()
+	if err != nil {
+		return err
+	}
+
+	var mainKeys []int
+	var modifiers []string
+
+	for _, p := range parts {
+		part := strings.ToLower(strings.TrimSpace(p))
+		if part == "" {
+			continue
+		}
+
+		switch part {
+		case "ctrl", "control":
+			kb.HasCTRL(true)
+			modifiers = append(modifiers, "Ctrl")
+		case "shift":
+			kb.HasSHIFT(true)
+			modifiers = append(modifiers, "Shift")
+		case "alt":
+			kb.HasALT(true)
+			modifiers = append(modifiers, "Alt")
+		case "win", "windows", "command", "cmd", "meta", "super":
+			kb.HasSuper(true)
+			modifiers = append(modifiers, "Win")
+		default:
+			// 尝试匹配 keyMap
+			if key, ok := keyMap[part]; ok {
+				mainKeys = append(mainKeys, key)
+			} else {
+				// 尝试匹配单字符
+				// 使用 rune 遍历以支持多字节字符（虽然 charMap 目前只支持 ASCII）
+				for _, r := range p {
+					charStr := strings.ToLower(string(r))
+					if len(charStr) > 0 {
+						if key, ok := charMap[charStr[0]]; ok {
+							mainKeys = append(mainKeys, key)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if len(mainKeys) == 0 && len(modifiers) == 0 {
+		return fmt.Errorf("未能识别出有效按键: %s", cmd)
+	}
+
+	log.Printf("解析结果 -> 修饰键: %v, 按键序列: %v (严格模式: %v)", modifiers, mainKeys, isStrict)
+
+	// 5. 执行模拟
+	// 逻辑：如果有修饰键，或者只有一个主键，执行单次组合键模拟
+	// 如果有多个主键且没有修饰键，我们逐个模拟以确保稳定性（模拟打字）
+	if len(modifiers) > 0 || len(mainKeys) <= 1 {
+		kb.SetKeys(mainKeys...)
+		return kb.Launching()
+	} else {
+		// 顺序模拟按键（打字模式）
+		for _, k := range mainKeys {
+			singleKb, _ := keybd_event.NewKeyBonding()
+			singleKb.SetKeys(k)
+			if err := singleKb.Launching(); err != nil {
+				return err
+			}
+			time.Sleep(10 * time.Millisecond) // 稍微停顿，增加稳定性
+		}
+	}
+
+	return nil
+}
+
+var keyMap = map[string]int{
+	// 基础控制
+	"enter":     keybd_event.VK_ENTER,
+	"回车":       keybd_event.VK_ENTER,
+	"确认":       keybd_event.VK_ENTER,
+	"esc":       keybd_event.VK_ESC,
+	"escape":    keybd_event.VK_ESC,
+	"退出":       keybd_event.VK_ESC,
+	"tab":       keybd_event.VK_TAB,
+	"制表":       keybd_event.VK_TAB,
+	"space":     keybd_event.VK_SPACE,
+	"空格":       keybd_event.VK_SPACE,
+	"backspace": keybd_event.VK_BACK,
+	"退格":       keybd_event.VK_BACK,
+	"del":       keybd_event.VK_DELETE,
+	"delete":    keybd_event.VK_DELETE,
+	"删除":       keybd_event.VK_DELETE,
+	"ins":       keybd_event.VK_INSERT,
+	"insert":    keybd_event.VK_INSERT,
+	"插入":       keybd_event.VK_INSERT,
+	"prtsc":     0x2C,
+	"printscreen": 0x2C,
+	"截屏":       0x2C,
+
+	// 方向键
+	"up":    keybd_event.VK_UP,
+	"down":  keybd_event.VK_DOWN,
+	"left":  keybd_event.VK_LEFT,
+	"right": keybd_event.VK_RIGHT,
+	"上":     keybd_event.VK_UP,
+	"下":     keybd_event.VK_DOWN,
+	"左":     keybd_event.VK_LEFT,
+	"右":     keybd_event.VK_RIGHT,
+
+	// 功能键
+	"f1": keybd_event.VK_F1, "f2": keybd_event.VK_F2, "f3": keybd_event.VK_F3, "f4": keybd_event.VK_F4,
+	"f5": keybd_event.VK_F5, "f6": keybd_event.VK_F6, "f7": keybd_event.VK_F7, "f8": keybd_event.VK_F8,
+	"f9": keybd_event.VK_F9, "f10": keybd_event.VK_F10, "f11": keybd_event.VK_F11, "f12": keybd_event.VK_F12,
+
+	// 页面控制
+	"home":   keybd_event.VK_HOME,
+	"end":    keybd_event.VK_END,
+	"pgup":   keybd_event.VK_PAGEUP,
+	"pgdn":   keybd_event.VK_PAGEDOWN,
+	"pageup": keybd_event.VK_PAGEUP,
+	"pagedown": keybd_event.VK_PAGEDOWN,
+	"向上翻页": keybd_event.VK_PAGEUP,
+	"向下翻页": keybd_event.VK_PAGEDOWN,
+
+	// 符号映射 (Windows VK Codes)
+	"+": 0xBB, "加号": 0xBB,
+	"-": 0xBD, "减号": 0xBD,
+	"=": 0xBB, "等于": 0xBB,
+	",": 0xBC, "逗号": 0xBC,
+	".": 0xBE, "句号": 0xBE,
+	"/": 0xBF, "斜杠": 0xBF,
+	";": 0xBA, "分号": 0xBA,
+	"'": 0xDE, "引号": 0xDE,
+	"[": 0xDB, "左括号": 0xDB,
+	"]": 0xDD, "右括号": 0xDD,
+	"\\": 0xdc, "反斜杠": 0xdc,
+	"`": 0xc0, "波浪号": 0xc0,
+}
+
+var charMap = map[byte]int{
+	'a': keybd_event.VK_A, 'b': keybd_event.VK_B, 'c': keybd_event.VK_C, 'd': keybd_event.VK_D,
+	'e': keybd_event.VK_E, 'f': keybd_event.VK_F, 'g': keybd_event.VK_G, 'h': keybd_event.VK_H,
+	'i': keybd_event.VK_I, 'j': keybd_event.VK_J, 'k': keybd_event.VK_K, 'l': keybd_event.VK_L,
+	'm': keybd_event.VK_M, 'n': keybd_event.VK_N, 'o': keybd_event.VK_O, 'p': keybd_event.VK_P,
+	'q': keybd_event.VK_Q, 'r': keybd_event.VK_R, 's': keybd_event.VK_S, 't': keybd_event.VK_T,
+	'u': keybd_event.VK_U, 'v': keybd_event.VK_V, 'w': keybd_event.VK_W, 'x': keybd_event.VK_X,
+	'y': keybd_event.VK_Y, 'z': keybd_event.VK_Z,
+	'0': keybd_event.VK_0, '1': keybd_event.VK_1, '2': keybd_event.VK_2, '3': keybd_event.VK_3,
+	'4': keybd_event.VK_4, '5': keybd_event.VK_5, '6': keybd_event.VK_6, '7': keybd_event.VK_7,
+	'8': keybd_event.VK_8, '9': keybd_event.VK_9,
+	' ': keybd_event.VK_SPACE,
+	'+': 0xBB, '-': 0xBD, '=': 0xBB, ',': 0xBC, '.': 0xBE, '/': 0xBF,
+	';': 0xBA, '\'': 0xDE, '[': 0xDB, ']': 0xDD, '\\': 0xDC, '`': 0xC0,
 }
 
 func pressCtrlV() error {
