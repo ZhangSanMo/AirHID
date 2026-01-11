@@ -241,6 +241,32 @@
     </div>
 
     <script>
+        // 获取并存储 Token (支持 URL 参数或 LocalStorage)
+        const urlParams = new URLSearchParams(window.location.search);
+        let authToken = urlParams.get('token');
+        
+        if (authToken) {
+            // 如果 URL 里有 Token，保存到本地并清洗 URL
+            localStorage.setItem('airhid_token', authToken);
+            // 清除地址栏参数，让 URL 看起来更干净
+            window.history.replaceState({}, document.title, "/");
+        } else {
+            // 如果 URL 里没 Token，尝试从本地读取
+            authToken = localStorage.getItem('airhid_token');
+        }
+        
+        if (!authToken) {
+            alert("错误：未检测到安全令牌。请重新扫描二维码。");
+            document.body.innerHTML = "<h2 style='text-align:center;padding:20px'>未授权访问</h2>";
+        }
+
+        // 封装带 Auth 的 fetch
+        async function authFetch(url, options = {}) {
+            if (!options.headers) options.headers = {};
+            options.headers['Authorization'] = 'Bearer ' + authToken;
+            return fetch(url, options);
+        }
+
         let mode = 'type';
         const input = document.getElementById('mainInput');
         const hint = document.getElementById('hint');
@@ -305,7 +331,7 @@
 
         async function sendMouseMove(dx, dy) {
             try {
-                await fetch('/mouse', {
+                await authFetch('/mouse', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ action: 'move', x: dx, y: dy })
@@ -315,7 +341,7 @@
 
         async function sendMouseClick(action) {
             try {
-                await fetch('/mouse', {
+                await authFetch('/mouse', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ action: action })
@@ -325,7 +351,7 @@
 
         async function sendMouseScroll(dy) {
             try {
-                await fetch('/mouse', {
+                await authFetch('/mouse', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ action: 'scroll', y: dy })
@@ -335,7 +361,7 @@
 
         async function checkStatus() {
             try {
-                const res = await fetch('/api/info');
+                const res = await authFetch('/api/info');
                 if (res.ok) {
                     document.getElementById('statusBox').className = 'status online';
                     document.getElementById('statusTxt').innerText = '在线';
@@ -384,7 +410,7 @@
         async function doSend(isAuto=false) {
             if (!input.value && !isAuto) return;
             try {
-                const res = await fetch('/type', {
+                const res = await authFetch('/type', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ text: input.value, mode: mode })
@@ -399,7 +425,7 @@
         async function sendCommand() {
             if (!input.value) return;
             try {
-                const res = await fetch('/command', {
+                const res = await authFetch('/command', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ command: input.value })
@@ -416,7 +442,7 @@
 
         async function sendKey(k) {
             try {
-                const res = await fetch('/key', {
+                const res = await authFetch('/key', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ key: k })
