@@ -365,6 +365,13 @@
                 if (res.ok) {
                     document.getElementById('statusBox').className = 'status online';
                     document.getElementById('statusTxt').innerText = '在线';
+                } else if (res.status === 401 || res.status === 403) {
+                    document.getElementById('statusBox').className = 'status';
+                    document.getElementById('statusTxt').innerText = '鉴权失败';
+                    // 如果鉴权失败，可以考虑停止轮询或者提示用户
+                } else {
+                    document.getElementById('statusBox').className = 'status';
+                    document.getElementById('statusTxt').innerText = '离线';
                 }
             } catch (e) {
                 document.getElementById('statusBox').className = 'status';
