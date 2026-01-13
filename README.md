@@ -13,9 +13,12 @@
 - **🔄 Seamless Reconnection**: 
     - **"Pair Once, Trust Forever"**: The web app remembers your token. 
     - Add to your home screen or bookmarks for one-tap access next time.
-- **⌨️ Smart Typing**: 
+- **⌨️ Smart Typing**:
     - Type on your phone's native keyboard (with auto-correct/suggestions) and send text instantly.
     - Support for special keys (Ctrl, Alt, Win, F1-F12) and shortcuts.
+    - **Repeat commands**: Execute any command multiple times:
+      - English: `5x backspace`, `ctrl+z*3`, `enter*10`
+      - 中文口语: `三次ctrl加z`, `回车五次`, `按十下退格`
 - **📋 Clipboard Sync**: Instantly paste text from your phone to your PC's clipboard.
 - **🖱️ Multi-Touch Trackpad**: 
     - Silky smooth mouse control with sensitivity adjustment.

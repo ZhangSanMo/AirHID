@@ -3,6 +3,8 @@ package input
 import (
 	"fmt"
 	"log"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -106,10 +108,141 @@ func pressCtrlV() error {
 }
 
 // SimulateCommand 解析并执行复杂命令
+// 支持的语法:
+//   - 基础命令: ctrl+c, alt+tab, f5
+//   - 重复执行: repeat:5:backspace, 3x enter, ctrl+z*10
+//   - 中文口语: "执行3次ctrl加z", "ctrl加z五次", "按三下回车"
 func SimulateCommand(cmd string) error {
 	kbMutex.Lock()
 	defer kbMutex.Unlock()
 
+	cmd = strings.ToLower(strings.TrimSpace(cmd))
+	if cmd == "" {
+		return fmt.Errorf("命令不能为空")
+	}
+
+	// 仅替换中文"加"为"+"，其他口语词汇由状态机自动忽略
+	cmd = strings.ReplaceAll(cmd, "加", "+")
+
+	// 检查是否是重复执行命令
+	repeatCount, actualCmd, isRepeat := parseRepeatCommand(cmd)
+	if isRepeat {
+		log.Printf("重复执行命令: %s, 次数: %d", actualCmd, repeatCount)
+		for i := 0; i < repeatCount; i++ {
+			if err := executeSingleCommand(actualCmd); err != nil {
+				return fmt.Errorf("第 %d 次执行失败: %w", i+1, err)
+			}
+			if i < repeatCount-1 {
+				time.Sleep(50 * time.Millisecond) // 每次执行之间的间隔
+			}
+		}
+		return nil
+	}
+
+	return executeSingleCommand(cmd)
+}
+
+// chineseNumMap 中文数字映射
+var chineseNumMap = map[rune]int{
+	'零': 0, '〇': 0,
+	'一': 1, '壹': 1,
+	'二': 2, '贰': 2, '两': 2,
+	'三': 3, '叁': 3,
+	'四': 4, '肆': 4,
+	'五': 5, '伍': 5,
+	'六': 6, '陆': 6,
+	'七': 7, '柒': 7,
+	'八': 8, '捌': 8,
+	'九': 9, '玖': 9,
+	'十': 10, '拾': 10,
+}
+
+// parseChineseNumber 解析中文数字（支持1-99）
+func parseChineseNumber(s string) (int, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+
+	// 先尝试解析阿拉伯数字
+	if n, err := strconv.Atoi(s); err == nil {
+		return n, true
+	}
+
+	// 解析中文数字
+	runes := []rune(s)
+	if len(runes) == 1 {
+		if n, ok := chineseNumMap[runes[0]]; ok {
+			return n, true
+		}
+	} else if len(runes) == 2 {
+		first, second := runes[0], runes[1]
+		if first == '十' || first == '拾' {
+			if n, ok := chineseNumMap[second]; ok {
+				return 10 + n, true
+			}
+		} else if second == '十' || second == '拾' {
+			if n, ok := chineseNumMap[first]; ok {
+				return n * 10, true
+			}
+		}
+	} else if len(runes) == 3 {
+		first, second, third := runes[0], runes[1], runes[2]
+		if second == '十' || second == '拾' {
+			if n1, ok1 := chineseNumMap[first]; ok1 {
+				if n2, ok2 := chineseNumMap[third]; ok2 {
+					return n1*10 + n2, true
+				}
+			}
+		}
+	}
+
+	return 0, false
+}
+
+// parseRepeatCommand 解析重复执行命令
+// 支持格式:
+//   - 次数x命令 (如 3xenter, 3x enter)
+//   - 命令*次数 (如 backspace*5, ctrl+z * 10)
+//   - 中文格式: "3次ctrl+z", "ctrl+z三次", "三下回车"
+func parseRepeatCommand(cmd string) (count int, actualCmd string, isRepeat bool) {
+	// 格式1: 次数x命令 (如 3xenter 或 3x enter)
+	xPattern := regexp.MustCompile(`^(\d+)x\s*(.+)$`)
+	if matches := xPattern.FindStringSubmatch(cmd); len(matches) == 3 {
+		if n, err := strconv.Atoi(matches[1]); err == nil && n > 0 && n <= 100 {
+			return n, strings.TrimSpace(matches[2]), true
+		}
+	}
+
+	// 格式3: 命令*次数 (如 backspace*5 或 ctrl+z * 10)
+	starPattern := regexp.MustCompile(`^(.+?)\s*\*\s*(\d+)$`)
+	if matches := starPattern.FindStringSubmatch(cmd); len(matches) == 3 {
+		if n, err := strconv.Atoi(matches[2]); err == nil && n > 0 && n <= 100 {
+			return n, strings.TrimSpace(matches[1]), true
+		}
+	}
+
+	// 格式4: 中文前置数字 "3次ctrl+z" 或 "三次ctrl+z" 或 "三下回车"
+	chinesePrefixPattern := regexp.MustCompile(`^([零一二三四五六七八九十百两\d]+)\s*[次下遍]\s*(.+)$`)
+	if matches := chinesePrefixPattern.FindStringSubmatch(cmd); len(matches) == 3 {
+		if n, ok := parseChineseNumber(matches[1]); ok && n > 0 && n <= 100 {
+			return n, strings.TrimSpace(matches[2]), true
+		}
+	}
+
+	// 格式5: 中文后置数字 "ctrl+z三次" 或 "回车5次" 或 "退格十下"
+	chineseSuffixPattern := regexp.MustCompile(`^(.+?)\s*([零一二三四五六七八九十百两\d]+)\s*[次下遍]$`)
+	if matches := chineseSuffixPattern.FindStringSubmatch(cmd); len(matches) == 3 {
+		if n, ok := parseChineseNumber(matches[2]); ok && n > 0 && n <= 100 {
+			return n, strings.TrimSpace(matches[1]), true
+		}
+	}
+
+	return 0, cmd, false
+}
+
+// executeSingleCommand 执行单个命令
+func executeSingleCommand(cmd string) error {
 	cmd = strings.ToLower(strings.TrimSpace(cmd))
 	if cmd == "" {
 		return fmt.Errorf("命令不能为空")
