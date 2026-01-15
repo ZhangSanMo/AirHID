@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -10,15 +11,23 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/skip2/go-qrcode"
+
 	"airhid/internal/input"
 )
 
 //go:embed templates/index.html
+//go:embed templates/connect.html
 var templatesFS embed.FS
 
 type Response struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
+}
+
+type ConnectData struct {
+	URL    string
+	QRCode string
 }
 
 type TypeRequest struct {
@@ -40,12 +49,21 @@ type MouseRequest struct {
 	Y      float64 `json:"y"`
 }
 
-var serverToken string
+var (
+	serverToken string
+	serverHost  string
+	serverPort  string
+	displayAddr string // IP to show in QR code
+)
 
-func Start(host, port, token string) error {
+func Start(host, port, token, displayIP string) error {
 	serverToken = token
+	serverHost = host
+	serverPort = port
+	displayAddr = displayIP
 	
 	http.HandleFunc("/", handleIndex)
+	http.HandleFunc("/connect", handleConnect)
 	
 	// Protected routes
 	http.HandleFunc("/type", authMiddleware(handleType))
@@ -183,6 +201,28 @@ func handleCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, true, "")
+}
+
+func handleConnect(w http.ResponseWriter, r *http.Request) {
+	url := fmt.Sprintf("http://%s:%s/?token=%s", displayAddr, serverPort, serverToken)
+
+	png, err := qrcode.Encode(url, qrcode.Medium, 256)
+	if err != nil {
+		http.Error(w, "Failed to generate QR code", http.StatusInternalServerError)
+		return
+	}
+
+	data := ConnectData{
+		URL:    url,
+		QRCode: base64.StdEncoding.EncodeToString(png),
+	}
+
+	tmpl, err := template.ParseFS(templatesFS, "templates/connect.html")
+	if err != nil {
+		http.Error(w, "Template not found: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tmpl.Execute(w, data)
 }
 
 func jsonResponse(w http.ResponseWriter, success bool, errMsg string) {

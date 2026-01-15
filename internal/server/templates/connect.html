@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AirHID Connection</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 50px; background-color: #f0f2f5; }
+        .container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: inline-block; }
+        h1 { margin-top: 0; color: #333; }
+        .url { margin: 20px 0; font-size: 18px; color: #555; word-break: break-all; }
+        .footer { margin-top: 30px; font-size: 14px; color: #888; }
+        img { border: 1px solid #ddd; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Scan to Connect</h1>
+        <img src="data:image/png;base64,{{.QRCode}}" alt="QR Code" width="256" height="256">
+        <div class="url">
+            <a href="{{.URL}}">{{.URL}}</a>
+        </div>
+        <div class="footer">Ensure your device is on the same Wi-Fi network.</div>
+    </div>
+</body>
+</html>

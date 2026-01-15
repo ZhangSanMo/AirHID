@@ -3,13 +3,14 @@
 **AirHID** turns your smartphone into a secure, professional-grade remote keyboard, mouse, and clipboard for your computer. No apps to install on your phone—just scan and control.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Go Version](https://img.shields.io/badge/go-1.20%2B-cyan.svg)
+![Go Version](https://img.shields.io/badge/go-1.25%2B-cyan.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
 
 ## ✨ Key Features
 
 - **🛡️ Secure by Design**: Auto-generated security tokens ensure only *you* can control your PC.
-- **⚡ Instant Connection**: Zero-config startup. Just run the exe and scan the QR code.
+- **🖥️ System Tray App**: Runs quietly in the background with a system tray icon.
+- **⚡ Auto-Start**: Easily enable "Run on Login" via the tray menu to have it always ready.
 - **🔄 Seamless Reconnection**: 
     - **"Pair Once, Trust Forever"**: The web app remembers your token. 
     - Add to your home screen or bookmarks for one-tap access next time.
@@ -27,50 +28,61 @@
 ## 🚀 Quick Start
 
 ### 1. Run
-Download and run `airhid.exe` on your Windows PC.
+Download and run `airhid.exe`. It will minimize to the **System Tray** (bottom right of your taskbar).
 
-```text
-AirHID Running (Secure Mode)
-Listening on: 0.0.0.0:5000
-Connect URL:  http://192.168.1.5:5000/?token=abc123...
-[QR Code Here]
-```
+### 2. Connect
+Right-click the AirHID tray icon and select **"Show Connection Info"**.
+This will open a page with a QR code in your browser.
 
-### 2. Scan
+### 3. Scan & Control
 Use your phone's camera to scan the QR code.
-
-### 3. Control
 - **Type Mode**: Type text and hit "Send".
 - **Clipboard Mode**: Paste long text blocks directly to PC clipboard.
 - **Touchpad Mode**: Use screen as a trackpad.
 
-> **Pro Tip:** Add the webpage to your phone's Home Screen. Next time you launch AirHID on PC, just tap the icon on your phone to reconnect instantly!
+> **Pro Tip:** Enable **"Enable Auto-Start"** in the tray menu so AirHID is always ready when you turn on your PC.
 
 ## ⚙️ Configuration
 
-AirHID creates a `config.json` file on the first run. You can customize it:
+AirHID creates a `config.json` file next to the executable on the first run:
 
 ```json
 {
   "token": "your-secret-token",  // Security token (keep secret!)
-  "host": "0.0.0.0",             // Bind address (e.g., "127.0.0.1" for local only)
+  "host": "0.0.0.0",             // Bind address
   "port": "5000"                 // Server port
 }
 ```
 
 ## 🛠️ Build from Source
 
-Requirements: [Go 1.20+](https://go.dev/)
+Requirements: [Go 1.25+](https://go.dev/)
 
-```bash
-git clone https://github.com/ZhangSanmo/airhid.git
-cd airhid
-go mod tidy
-go build -o airhid.exe main.go
-```
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/ZhangSanmo/airhid.git
+    cd airhid
+    ```
 
-## ⚠️ Note
-Run as **Administrator** if you need to simulate input into elevated windows (like Task Manager or some full-screen games).
+2.  (Optional) Install `rsrc` to embed the icon:
+    ```bash
+    go install github.com/akavel/rsrc@latest
+    rsrc -ico internal/icon/icon.ico -o rsrc.syso
+    ```
+
+3.  Build (Windows GUI mode):
+    ```bash
+    go mod tidy
+    go build -ldflags="-H windowsgui" -o airhid.exe
+    ```
+
+## ⚠️ Important Note
+**Administrative Privileges**:
+AirHID does **not** run as Administrator by default. This is safer, but it means you cannot control windows that *are* running as Administrator (e.g., Task Manager, Registry Editor) due to Windows security isolation.
+
+If you need to control these windows:
+1.  Right-click `airhid.exe`
+2.  Select **Run as Administrator**
 
 ## 📄 License
 
