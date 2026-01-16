@@ -45,7 +45,7 @@ func onReady() {
 
 	// Periodic status check for Auto-Start
 	go func() {
-		ticker := time.NewTicker(1 * time.Second) // Check immediately then loop
+		ticker := time.NewTicker(2 * time.Second) // Check every 2s to reduce load
 		defer ticker.Stop()
 		for {
 			enabled := system.AutoStartEnabled()
