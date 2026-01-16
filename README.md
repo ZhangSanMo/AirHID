@@ -67,13 +67,13 @@ Requirements: [Go 1.25+](https://go.dev/)
 2.  (Optional) Install `rsrc` to embed the icon:
     ```bash
     go install github.com/akavel/rsrc@latest
-    rsrc -ico internal/icon/icon.ico -o rsrc.syso
+    rsrc -arch amd64 -ico internal/icon/icon.ico -o rsrc.syso
     ```
 
 3.  Build (Windows GUI mode):
     ```bash
     go mod tidy
-    go build -ldflags="-H windowsgui" -o airhid.exe
+    go build -ldflags="-H windowsgui" -o airhid.exe .
     ```
 
 ## ⚠️ Important Note

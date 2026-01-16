@@ -26,8 +26,8 @@ jobs:
         run: |
           go mod download
           go install github.com/akavel/rsrc@latest
-          $(go env GOPATH)/bin/rsrc -ico internal/icon/icon.ico -o rsrc.syso
-          GOOS=windows GOARCH=amd64 go build -v -ldflags "-s -w -H windowsgui" -o AirHID.exe main.go
+          $(go env GOPATH)/bin/rsrc -arch amd64 -ico internal/icon/icon.ico -o rsrc.syso
+          GOOS=windows GOARCH=amd64 go build -v -ldflags "-s -w -H windowsgui" -o AirHID.exe
 
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v2
