@@ -5,8 +5,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -41,6 +43,16 @@ func AutoStartEnabled() bool {
 	return false
 }
 
+// runElevated runs a command with Administrator privileges using the "runas" verb
+func runElevated(command string, args ...string) error {
+	verb, _ := windows.UTF16PtrFromString("runas")
+	exe, _ := windows.UTF16PtrFromString(command)
+	params, _ := windows.UTF16PtrFromString(strings.Join(args, " "))
+	cwd, _ := windows.UTF16PtrFromString("")
+
+	return windows.ShellExecute(0, verb, exe, params, cwd, windows.SW_NORMAL)
+}
+
 // EnableAutoStart creates a Scheduled Task with highest privileges
 func EnableAutoStart() error {
 	exePath, err := os.Executable()
@@ -54,11 +66,17 @@ func EnableAutoStart() error {
 	// Quote path to handle spaces
 	cmdPath := fmt.Sprintf("\"%s\"", exePath)
 
+	if !IsAdmin() {
+		return runElevated("schtasks", "/Create", "/TN", taskName, "/TR", cmdPath, "/SC", "ONLOGON", "/RL", "HIGHEST", "/IT", "/DELAY", "0000:30", "/F")
+	}
+
 	// Create Task
 	// /SC ONLOGON : Start on login
 	// /RL HIGHEST : Run as Administrator
+	// /IT : Run only if user is logged on (Interactive) - Fixes visibility issues
+	// /DELAY 0000:30 : Wait 30 seconds for system/network initialization
 	// /F : Force overwrite
-	cmd := exec.Command("schtasks", "/Create", "/TN", taskName, "/TR", cmdPath, "/SC", "ONLOGON", "/RL", "HIGHEST", "/F")
+	cmd := exec.Command("schtasks", "/Create", "/TN", taskName, "/TR", cmdPath, "/SC", "ONLOGON", "/RL", "HIGHEST", "/IT", "/DELAY", "0000:30", "/F")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	return cmd.Run()
 }
@@ -66,6 +84,11 @@ func EnableAutoStart() error {
 // DisableAutoStart removes the scheduled task
 func DisableAutoStart() error {
 	cleanRegistryAutoStart()
+
+	if !IsAdmin() {
+		return runElevated("schtasks", "/Delete", "/TN", taskName, "/F")
+	}
+
 	cmd := exec.Command("schtasks", "/Delete", "/TN", taskName, "/F")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	return cmd.Run()

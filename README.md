@@ -80,7 +80,10 @@ Requirements: [Go 1.25+](https://go.dev/)
 **Administrative Privileges**:
 AirHID does **not** run as Administrator by default. This is safer, but it means you cannot control windows that *are* running as Administrator (e.g., Task Manager, Registry Editor) due to Windows security isolation.
 
-If you need to control these windows:
+**Auto-Start Elevation**:
+When enabling "Auto-Start" from the menu, AirHID will automatically prompt for permission (UAC) to register the startup task. You do **not** need to restart the app as Administrator just to enable this feature.
+
+If you need to control admin-level windows (like Task Manager) remotely:
 1.  Right-click `airhid.exe`
 2.  Select **Run as Administrator**
 

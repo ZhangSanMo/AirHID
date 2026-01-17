@@ -35,11 +35,17 @@ func onReady() {
 
 	// Start local server
 	go func() {
+		mStatus.SetTitle("Server: Initializing...")
+		if err := initServer(); err != nil {
+			log.Println("Local server init failed:", err)
+			mStatus.SetTitle("Server: Config Error")
+			return
+		}
+
 		mStatus.SetTitle("Server: Running")
-		err := runServer()
-		if err != nil {
-			log.Println("Local server start failed:", err)
-			mStatus.SetTitle("Server: Stopped (Port Busy?)")
+		if err := server.Start(); err != nil {
+			log.Println("Local server stopped:", err)
+			mStatus.SetTitle("Server: Stopped")
 		}
 	}()
 
@@ -92,7 +98,7 @@ func onExit() {
 	// Cleanup if needed
 }
 
-func runServer() error {
+func initServer() error {
 	cfg, err := config.LoadOrInit()
 	if err != nil {
 		return err
@@ -112,5 +118,6 @@ func runServer() error {
 	log.Printf("Starting AirHID on %s:%s", cfg.Host, cfg.Port)
 	log.Printf("URL: %s", url)
 
-	return server.Start(cfg.Host, cfg.Port, cfg.Token, displayIP)
+	server.SetupRoutes(cfg.Host, cfg.Port, cfg.Token, displayIP)
+	return nil
 }

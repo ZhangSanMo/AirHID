@@ -56,23 +56,25 @@ var (
 	displayAddr string // IP to show in QR code
 )
 
-func Start(host, port, token, displayIP string) error {
+func SetupRoutes(host, port, token, displayIP string) {
 	serverToken = token
 	serverHost = host
 	serverPort = port
 	displayAddr = displayIP
-	
+
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/connect", handleConnect)
-	
+
 	// Protected routes
 	http.HandleFunc("/type", authMiddleware(handleType))
 	http.HandleFunc("/command", authMiddleware(handleCommand))
 	http.HandleFunc("/key", authMiddleware(handleKey))
 	http.HandleFunc("/mouse", authMiddleware(handleMouse))
 	http.HandleFunc("/api/info", authMiddleware(handleInfo))
+}
 
-	addr := fmt.Sprintf("%s:%s", host, port)
+func Start() error {
+	addr := fmt.Sprintf("%s:%s", serverHost, serverPort)
 	return http.ListenAndServe(addr, nil)
 }
 
