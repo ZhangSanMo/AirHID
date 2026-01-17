@@ -119,9 +119,6 @@ func SimulateCommand(cmd string) error {
 		return fmt.Errorf("命令不能为空")
 	}
 
-	// 仅替换中文"加"为"+"，其他口语词汇由状态机自动忽略
-	cmd = strings.ReplaceAll(cmd, "加", "+")
-
 	// 检查是否是重复执行命令
 	repeatCount, actualCmd, isRepeat := parseRepeatCommand(cmd)
 	if isRepeat {
@@ -142,114 +139,27 @@ func SimulateCommand(cmd string) error {
 
 // executeSingleCommand 执行单个命令
 func executeSingleCommand(cmd string) error {
-	cmd = strings.ToLower(strings.TrimSpace(cmd))
-	if cmd == "" {
-		return fmt.Errorf("命令不能为空")
+	mainKeys, modifiers, err := ParseCommand(cmd)
+	if err != nil {
+		return err
 	}
-
-	// 1. 准备按键识别基础
-	modifierNames := []string{"control", "ctrl", "shift", "alt", "windows", "win", "command", "cmd", "meta", "super"}
 
 	kb, err := keybd_event.NewKeyBonding()
 	if err != nil {
 		return err
 	}
 
-	var mainKeys []int
-	var modifiers []string
-	inSegment := false
-
-	runes := []rune(cmd)
-	for i := 0; i < len(runes); {
-		matchLen := 0
-		foundKey := ""
-		isMod := false
-		currentSuffix := string(runes[i:])
-
-		// A. 尝试匹配长名修饰键
-		for _, m := range modifierNames {
-			if strings.HasPrefix(currentSuffix, m) {
-				foundKey = m
-				isMod = true
-				matchLen = len([]rune(m))
-				break
-			}
+	for _, m := range modifiers {
+		switch m {
+		case "Ctrl":
+			kb.HasCTRL(true)
+		case "Shift":
+			kb.HasSHIFT(true)
+		case "Alt":
+			kb.HasALT(true)
+		case "Win":
+			kb.HasSuper(true)
 		}
-
-		// B. 尝试匹配 keyMap
-		if foundKey == "" {
-			for k := range keyMap {
-				if strings.HasPrefix(currentSuffix, k) {
-					if len([]rune(k)) > matchLen {
-						foundKey = k
-						matchLen = len([]rune(k))
-					}
-				}
-			}
-			// 特殊处理空格描述
-			if strings.HasPrefix(currentSuffix, "space") {
-				if 5 > matchLen {
-					foundKey = "space"
-					matchLen = 5
-				}
-			}
-			if strings.HasPrefix(currentSuffix, "空格") {
-				if 2 > matchLen {
-					foundKey = "空格"
-					matchLen = 2
-				}
-			}
-		}
-
-		// C. 尝试匹配 charMap
-		if foundKey == "" {
-			r := runes[i]
-			if r < 128 && r != ' ' { // ASCII 字符且不是普通空格
-				if _, ok := charMap[byte(r)]; ok {
-					foundKey = string(r)
-					matchLen = 1
-				}
-			}
-		}
-
-		// 2. 状态机逻辑
-		if foundKey != "" {
-			if !inSegment {
-				if isMod {
-					switch foundKey {
-					case "ctrl", "control":
-						kb.HasCTRL(true)
-						modifiers = append(modifiers, "Ctrl")
-					case "shift":
-						kb.HasSHIFT(true)
-						modifiers = append(modifiers, "Shift")
-					case "alt":
-						kb.HasALT(true)
-						modifiers = append(modifiers, "Alt")
-					case "win", "windows", "command", "cmd", "meta", "super":
-						kb.HasSuper(true)
-						modifiers = append(modifiers, "Win")
-					}
-				} else {
-					if foundKey == "space" || foundKey == "空格" {
-						mainKeys = append(mainKeys, keybd_event.VK_SPACE)
-					} else if vk, ok := keyMap[foundKey]; ok {
-						mainKeys = append(mainKeys, vk)
-					} else {
-						mainKeys = append(mainKeys, charMap[foundKey[0]])
-					}
-				}
-				inSegment = true
-			}
-			i += matchLen
-		} else {
-			inSegment = false
-			i++
-		}
-	}
-
-	if len(mainKeys) == 0 && len(modifiers) == 0 {
-		return fmt.Errorf("未能识别出有效按键: %s", cmd)
 	}
 
 	log.Printf("解析结果 -> 修饰键: %v, 按键序列: %v", modifiers, mainKeys)

@@ -1,6 +1,7 @@
 package input
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -105,6 +106,121 @@ func parseRepeatCommand(cmd string) (count int, actualCmd string, isRepeat bool)
 	}
 
 	return 0, cmd, false
+}
+
+// ParseCommand 将命令字符串解析为按键序列和修饰键
+func ParseCommand(cmd string) (mainKeys []int, modifiers []string, err error) {
+	cmd = strings.ToLower(strings.TrimSpace(cmd))
+	if cmd == "" {
+		return nil, nil, fmt.Errorf("命令不能为空")
+	}
+
+	// 替换中文"加"为"+"，方便统一解析
+	cmd = strings.ReplaceAll(cmd, "加", "+")
+
+	// 准备按键识别基础
+	modifierNames := []string{"control", "ctrl", "shift", "alt", "windows", "win", "command", "cmd", "meta", "super"}
+
+	type token struct {
+		val   string
+		isMod bool
+		vk    int
+	}
+	var tokens []token
+
+	runes := []rune(cmd)
+	for i := 0; i < len(runes); {
+		matchLen := 0
+		foundKey := ""
+		isMod := false
+		vk := 0
+		currentSuffix := string(runes[i:])
+
+		// A. 尝试匹配长名修饰键
+		for _, m := range modifierNames {
+			if strings.HasPrefix(currentSuffix, m) {
+				foundKey = m
+				isMod = true
+				matchLen = len([]rune(m))
+				break
+			}
+		}
+
+		// B. 尝试匹配 keyMap
+		if foundKey == "" {
+			for k, v := range keyMap {
+				if strings.HasPrefix(currentSuffix, k) {
+					if len([]rune(k)) > matchLen {
+						foundKey = k
+						vk = v
+						matchLen = len([]rune(k))
+					}
+				}
+			}
+		}
+
+		// C. 尝试匹配 charMap
+		if foundKey == "" {
+			r := runes[i]
+			if r < 128 && r != ' ' { // ASCII 字符且不是普通空格
+				if v, ok := charMap[byte(r)]; ok {
+					foundKey = string(r)
+					vk = v
+					matchLen = 1
+				}
+			} else if r == ' ' {
+				foundKey = " "
+				vk = keybd_event.VK_SPACE
+				matchLen = 1
+			}
+		}
+
+		if foundKey != "" {
+			tokens = append(tokens, token{val: foundKey, isMod: isMod, vk: vk})
+			i += matchLen
+		} else {
+			i++
+		}
+	}
+
+	// 第二遍：过滤掉作为连接符的 "+" 和 " "
+	for i, t := range tokens {
+		if t.val == "+" || t.val == " " {
+			// 如果不是唯一的 token，且前后有其他有效按键/修饰键，则视为连接符跳过
+			isSeparator := false
+			if len(tokens) > 1 {
+				hasPrev := i > 0
+				hasNext := i < len(tokens)-1
+				if hasPrev || hasNext {
+					isSeparator = true
+				}
+			}
+			if isSeparator {
+				continue
+			}
+		}
+
+		if t.isMod {
+			switch t.val {
+			case "ctrl", "control":
+				modifiers = append(modifiers, "Ctrl")
+			case "shift":
+				modifiers = append(modifiers, "Shift")
+			case "alt":
+				modifiers = append(modifiers, "Alt")
+			case "win", "windows", "command", "cmd", "meta", "super":
+				modifiers = append(modifiers, "Win")
+			}
+		} else {
+			mainKeys = append(mainKeys, t.vk)
+		}
+	}
+
+	if len(mainKeys) == 0 && len(modifiers) == 0 {
+		return nil, nil, fmt.Errorf("未能识别出有效按键: %s", cmd)
+	}
+
+	return mainKeys, modifiers, nil
 }
 
 var keyMap = map[string]int{

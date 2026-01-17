@@ -213,6 +213,44 @@ func TestCharMapContents(t *testing.T) {
 	}
 }
 
+// TestParseCommand 测试命令解析
+func TestParseCommand(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantKeys  int // 预期的主按键数量
+		wantMods  int // 预期的修饰键数量
+		shouldErr bool
+	}{
+		{"简单按键", "enter", 1, 0, false},
+		{"简单组合键", "ctrl+c", 1, 1, false},
+		{"复杂组合键", "ctrl+alt+delete", 1, 2, false},
+		{"带空格组合键", "ctrl + v", 1, 1, false},
+		{"中文组合键", "ctrl+c", 1, 1, false}, // SimulateCommand 会处理 "加"
+		{"多个按键序列", "enter tab", 2, 0, false},
+		{"问题用例-ctrl+w", "ctrl+w", 1, 1, false},
+		{"中文加号带标点", "Ctrl加W。", 1, 1, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			keys, mods, err := ParseCommand(tt.input)
+			if (err != nil) != tt.shouldErr {
+				t.Errorf("ParseCommand(%q) error = %v, shouldErr = %v", tt.input, err, tt.shouldErr)
+				return
+			}
+			if err == nil {
+				if len(keys) != tt.wantKeys {
+					t.Errorf("ParseCommand(%q) got %d keys, want %d", tt.input, len(keys), tt.wantKeys)
+				}
+				if len(mods) != tt.wantMods {
+					t.Errorf("ParseCommand(%q) got %d mods, want %d", tt.input, len(mods), tt.wantMods)
+				}
+			}
+		})
+	}
+}
+
 // BenchmarkParseChineseNumber 基准测试中文数字解析
 func BenchmarkParseChineseNumber(b *testing.B) {
 	testCases := []string{"三", "十五", "二十一", "九十九", "5", "50"}
