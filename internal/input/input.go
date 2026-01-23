@@ -21,6 +21,8 @@ const (
 	MouseActionClick      = "click"
 	MouseActionRightClick = "right_click"
 	MouseActionScroll     = "scroll"
+	MouseActionDown       = "down"
+	MouseActionUp         = "up"
 )
 
 // SimulateType 模拟文本输入

@@ -23,7 +23,11 @@
 - **📋 Clipboard Sync**: Instantly paste text from your phone to your PC's clipboard.
 - **🖱️ Multi-Touch Trackpad**: 
     - Silky smooth mouse control with sensitivity adjustment.
-    - Supports tap-to-click, two-finger scroll, and right-click.
+    - **Gestures**:
+        - Single tap to Click.
+        - **Double-tap and hold to Drag**.
+        - Two-finger tap for Right-click.
+        - Two-finger slide to Scroll.
 
 ## 🚀 Quick Start
 

@@ -274,57 +274,153 @@
         const buttons = document.getElementById('mainButtons');
 
         let lastX, lastY;
-        let isMoving = false;
+        let startX, startY; 
         let startTime;
         let maxFingers = 0;
         let sensitivity = 1.5;
+        let accX = 0, accY = 0;
+        
+        // 状态管理
+        let clickTimer = null;         // 单击延时器
+        let isDragTentative = false;   // 可能是拖拽（双击按下未松开）
+        let isDragging = false;        // 确认拖拽中
+        
+        const TAP_DELAY = 300;         // 等待双击判定的延时(ms) - 增加到300ms以匹配参考
+        const TAP_TOLERANCE = 30;      // 点击位移容差(px)
 
         // Touchpad logic
         touchpad.addEventListener('touchstart', (e) => {
             const touch = e.touches[0];
-            lastX = touch.clientX;
-            lastY = touch.clientY;
-            isMoving = false;
+            lastX = startX = touch.clientX;
+            lastY = startY = touch.clientY;
             startTime = Date.now();
             maxFingers = Math.max(maxFingers, e.touches.length);
+            accX = 0; accY = 0;
+            
+            if (e.touches.length === 1) {
+                // 如果此时有挂起的单击定时器，说明是第二次点击 -> 进入候选拖拽/双击状态
+                if (clickTimer) {
+                    clearTimeout(clickTimer);
+                    clickTimer = null;
+                    isDragTentative = true;
+                    updateHint('● 准备...', false);
+                }
+            }
         });
 
         touchpad.addEventListener('touchmove', (e) => {
             e.preventDefault();
             maxFingers = Math.max(maxFingers, e.touches.length);
             const touch = e.touches[0];
-            const dx = (touch.clientX - lastX) * sensitivity;
-            const dy = (touch.clientY - lastY) * sensitivity;
+            
+            const rawDx = (touch.clientX - lastX) * sensitivity;
+            const rawDy = (touch.clientY - lastY) * sensitivity;
+            const totalDist = Math.hypot(touch.clientX - startX, touch.clientY - startY);
 
-            if (e.touches.length === 1) {
-                if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
-                    sendMouseMove(dx, dy);
-                    isMoving = true;
+            // 逻辑分支 A: 处于候选状态 (双击按住)
+            if (isDragTentative) {
+                // 如果移动超过容差(5px)，确认为“拖拽”
+                if (totalDist > 5) { 
+                    isDragTentative = false;
+                    isDragging = true;
+                    sendMouseAction('down'); 
+                    
+                    // 关键优化：确认为拖拽的这一刻，将坐标基准重置为当前手指位置
+                    // 这样后续产生的 dx/dy 将从当前位置开始计算，
+                    // 从而避免了从 startX 到当前位置这段“判定位移”导致鼠标指针跳变。
+                    lastX = touch.clientX;
+                    lastY = touch.clientY;
+                    accX = 0; accY = 0;
+                    
+                    updateHint('● 拖拽中', false);
+                    return; // 这一帧不产生位移，下一帧开始
                 }
-            } else if (e.touches.length === 2) {
-                // Two finger scroll
+            }
+            
+            // 逻辑分支 B: 已经是拖拽状态
+            if (isDragging) {
+                 accX += rawDx;
+                 accY += rawDy;
+                 const sendX = Math.trunc(accX);
+                 const sendY = Math.trunc(accY);
+                 
+                 if (sendX !== 0 || sendY !== 0) {
+                     sendMouseMove(sendX, sendY);
+                     accX -= sendX;
+                     accY -= sendY;
+                 }
+            } 
+            // 逻辑分支 C: 普通移动
+            else if (!isDragTentative && e.touches.length === 1) {
+                accX += rawDx;
+                accY += rawDy;
+                const sendX = Math.trunc(accX);
+                const sendY = Math.trunc(accY);
+                if (sendX !== 0 || sendY !== 0) {
+                    sendMouseMove(sendX, sendY);
+                    accX -= sendX;
+                    accY -= sendY;
+                }
+            }
+            // 双指滚动
+            else if (e.touches.length === 2) {
                 const sdy = (touch.clientY - lastY) * sensitivity;
-                if (Math.abs(sdy) > 1) {
-                    sendMouseScroll(sdy * 5); // Adjust direction
-                    isMoving = true;
-                }
+                if (Math.abs(sdy) > 1) sendMouseScroll(sdy * 5); 
             }
             
             lastX = touch.clientX;
             lastY = touch.clientY;
         }, { passive: false });
 
-        touchpad.addEventListener('touchend', (e) => {
+        const handleTouchEnd = (e) => {
             const duration = Date.now() - startTime;
-            if (!isMoving && duration < 250) {
-                if (maxFingers === 1) {
-                    sendMouseClick('click');
-                } else if (maxFingers === 2) {
-                    sendMouseClick('right_click');
+            // 容错: 如果没有 changedTouches (e.g. touchcancel), 用最后已知坐标
+            const touch = e.changedTouches && e.changedTouches.length > 0 ? e.changedTouches[0] : { clientX: lastX, clientY: lastY };
+            const totalDist = Math.hypot(touch.clientX - startX, touch.clientY - startY);
+            
+            // 1. 结束拖拽
+            if (isDragging) {
+                if (e.touches.length === 0) {
+                    sendMouseAction('up');
+                    isDragging = false;
+                    updateHint('拖拽结束');
                 }
+                return;
             }
+
+            // 2. 结束候选状态 (双击按住但在没移动就松开了 -> 视为双击)
+            if (isDragTentative) {
+                isDragTentative = false;
+                if (e.touches.length === 0) {
+                    // 补发两次点击，间隔稍大一点确保系统识别
+                    sendMouseAction('click');
+                    setTimeout(() => sendMouseAction('click'), 100); 
+                    updateHint('双击');
+                }
+                return;
+            }
+
+            // 3. 普通点击判定 (第一次点击)
+            if (duration < 250 && totalDist < TAP_TOLERANCE && maxFingers === 1) {
+                // 启动延时器，等待 potential 的第二次点击
+                updateHint('等待...', false);
+                clickTimer = setTimeout(() => {
+                    sendMouseAction('click');
+                    clickTimer = null;
+                    updateHint('单击');
+                }, TAP_DELAY);
+            } 
+            // 4. 右键 (双指点击)
+            else if (duration < 250 && totalDist < TAP_TOLERANCE && maxFingers === 2) {
+                sendMouseAction('right_click');
+                updateHint('右键');
+            }
+
             if (e.touches.length === 0) maxFingers = 0;
-        });
+        };
+
+        touchpad.addEventListener('touchend', handleTouchEnd);
+        touchpad.addEventListener('touchcancel', handleTouchEnd);
 
         // Add right click support via long press or just double tap? 
         // Let's stick to simple tap for now. Maybe a button for right click.
@@ -339,7 +435,7 @@
             } catch (e) {}
         }
 
-        async function sendMouseClick(action) {
+        async function sendMouseAction(action) {
             try {
                 await authFetch('/mouse', {
                     method: 'POST',

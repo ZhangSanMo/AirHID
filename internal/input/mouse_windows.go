@@ -33,6 +33,10 @@ func SimulateMouse(action string, x, y float64) {
 		mouseEvent(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
 	case MouseActionScroll:
 		mouseEvent(MOUSEEVENTF_WHEEL, 0, 0, uintptr(int32(y)), 0)
+	case MouseActionDown:
+		mouseEvent(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+	case MouseActionUp:
+		mouseEvent(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 	}
 }
 
